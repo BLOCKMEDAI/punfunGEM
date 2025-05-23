@@ -120,3 +120,4 @@ if __name__ == "__main__":
     while True:
         fetch_new_tokens()
         time.sleep(INTERVAL_SECONDS)
+
