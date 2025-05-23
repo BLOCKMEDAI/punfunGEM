@@ -1,62 +1,65 @@
-import asyncio
-import json
-import logging
 import os
+import time
+import requests
 import telegram
-import websockets
-
-# Configuração do logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+import logging
 
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 
-# Guardar tokens já enviados
+# Já enviados
 sent_tokens = set()
 
-async def listen_pump_ws():
-    url = "wss://pump.fun/ws"
-    async with websockets.connect(url) as ws:
-        logging.info("Conectado ao WebSocket da Pump.fun")
+# Configuração de logs
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-        while True:
-            try:
-                raw = await ws.recv()
-                data = json.loads(raw)
+API_URL = "https://pump.fun/api/tokens"
+INTERVAL = 30  # segundos
 
-                # Processa apenas novos tokens
-                if isinstance(data, dict) and data.get("type") == "newToken":
-                    token_data = data.get("data", {})
-                    name = token_data.get("name")
-                    symbol = token_data.get("symbol")
-                    twitter = token_data.get("twitter")
-                    telegram_link = token_data.get("telegram")
-                    website = token_data.get("website")
-                    mint = token_data.get("mint")
+def fetch_tokens():
+    try:
+        response = requests.get(API_URL)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logging.error(f"Erro ao buscar tokens: {e}")
+        return []
 
-                    # Verifica se tem Twitter ou Telegram e se ainda não foi enviado
-                    if (twitter or telegram_link) and mint and mint not in sent_tokens:
-                        message = (
-                            f"🚀 Novo token criado na Pump.fun!\n\n"
-                            f"🪙 Nome: {name} ({symbol})\n"
-                            f"📄 Mint: {mint}"
-                        )
-                        if twitter:
-                            message += f"\n🐦 Twitter: {twitter}"
-                        if telegram_link:
-                            message += f"\n💬 Telegram: {telegram_link}"
-                        if website:
-                            message += f"\n🌐 Website: {website}"
+def process_tokens():
+    tokens = fetch_tokens()
 
-                        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-                        sent_tokens.add(mint)
-                        logging.info(f"Token enviado: {name} ({mint})")
+    for token in tokens:
+        mint = token.get("id")
+        name = token.get("name")
+        symbol = token.get("symbol", "")
+        twitter = token.get("twitter")
+        telegram_link = token.get("telegram")
+        website = token.get("website")
 
-            except Exception as e:
-                logging.error(f"Erro no WebSocket: {e}")
-                await asyncio.sleep(5)
+        if mint in sent_tokens:
+            continue
+
+        if twitter or telegram_link:
+            message = (
+                f"🚀 Novo token criado na Pump.fun!\n\n"
+                f"🪙 Nome: {name} ({symbol})\n"
+                f"📄 Mint: {mint}"
+            )
+            if twitter:
+                message += f"\n🐦 Twitter: {twitter}"
+            if telegram_link:
+                message += f"\n💬 Telegram: {telegram_link}"
+            if website:
+                message += f"\n🌐 Website: {website}"
+
+            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+            sent_tokens.add(mint)
+            logging.info(f"Token enviado: {name} ({mint})")
 
 if __name__ == "__main__":
-    asyncio.run(listen_pump_ws())
+    logging.info("Bot iniciado...")
+    while True:
+        process_tokens()
+        time.sleep(INTERVAL)
