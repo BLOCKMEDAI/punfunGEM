@@ -18,8 +18,8 @@ bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 # Guardar contratos já enviados
 sent_tokens = set()
 
-# Configuração da API
-API_URL = "https://client-api-2-phi.vercel.app/api/trending"
+# Configuração da API (Pump.fun - Solana)
+API_URL = "https://api.tradepump.fun/v1/solana"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 INTERVAL_SECONDS = 30  # Intervalo entre requisições
 MAX_RETRIES = 3  # Número máximo de tentativas em caso de erro
@@ -31,6 +31,11 @@ def fetch_new_tokens():
             response = requests.get(API_URL, headers=HEADERS, timeout=10)  # Timeout de 10s
             response.raise_for_status()  # Verifica erros HTTP
             data = response.json()
+
+            # Verifica se a resposta contém a lista de tokens
+            if not isinstance(data, list):
+                logging.warning("Resposta inesperada da API")
+                return
 
             for token in data:
                 address = token.get("address")
