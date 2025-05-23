@@ -19,46 +19,82 @@ bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 sent_tokens = set()
 
 # Configuração da API (Pump.fun - Solana)
-API_URL = "https://api.tradepump.fun/v1/solana"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+GRAPHQL_API_URL = "https://graphql.bitquery.io"
+HEADERS = {
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0"
+}
+
+GRAPHQL_QUERY = {
+    "query": """
+    subscription {
+      Solana {
+        TokenSupplyUpdates(
+          where: {Instruction: {Program: {Address: {is: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"}, Method: {is: "create"}}}}
+        ) {
+          Block{
+            Time
+          }
+          Transaction{
+            Signer
+          }
+          TokenSupplyUpdate {
+            Amount
+            Currency {
+              Symbol
+              Name
+              MintAddress
+              MetadataAddress
+            }
+            PostBalance
+          }
+        }
+      }
+    }
+    """
+}
+
 INTERVAL_SECONDS = 30  # Intervalo entre requisições
 MAX_RETRIES = 3  # Número máximo de tentativas em caso de erro
 
 def fetch_new_tokens():
-    """Busca novos tokens e envia para o Telegram, com tratamento de erros."""
+    """Busca novos tokens via GraphQL e envia para o Telegram."""
     for attempt in range(MAX_RETRIES):
         try:
-            response = requests.get(API_URL, headers=HEADERS, timeout=10)  # Timeout de 10s
+            response = requests.post(GRAPHQL_API_URL, json=GRAPHQL_QUERY, headers=HEADERS, timeout=10)
             response.raise_for_status()  # Verifica erros HTTP
             data = response.json()
 
-            # Verifica se a resposta contém a lista de tokens
-            if not isinstance(data, list):
-                logging.warning("Resposta inesperada da API")
+            # Extraindo informações dos tokens
+            tokens = data.get("data", {}).get("Solana", {}).get("TokenSupplyUpdates", [])
+            
+            if not tokens:
+                logging.warning("Nenhum token encontrado.")
                 return
+            
+            for token in tokens:
+                currency = token.get("TokenSupplyUpdate", {}).get("Currency", {})
+                name = currency.get("Name")
+                symbol = currency.get("Symbol")
+                mint_address = currency.get("MintAddress")
+                metadata_address = currency.get("MetadataAddress")
+                post_balance = token.get("TokenSupplyUpdate", {}).get("PostBalance")
 
-            for token in data:
-                address = token.get("address")
-                name = token.get("name")
-                twitter = token.get("twitter")
-                telegram_link = token.get("telegram")
-
-                if not address or not name:
+                if not name or not mint_address:
                     continue
 
-                # Filtra os que têm Twitter e Telegram, e ainda não foram enviados
-                if twitter and telegram_link and address not in sent_tokens:
+                if mint_address not in sent_tokens:
                     message = (
-                        f"🚀 Novo token lançado no Pump.fun!\n\n"
-                        f"🪙 Nome: {name}\n"
-                        f"📄 Contrato: {address}\n"
-                        f"🐦 Twitter: {twitter}\n"
-                        f"📢 Telegram: {telegram_link}"
+                        f"🚀 Novo token Pump.fun criado!\n\n"
+                        f"🪙 Nome: {name} ({symbol})\n"
+                        f"📄 Mint Address: {mint_address}\n"
+                        f"📝 Metadata Address: {metadata_address}\n"
+                        f"💰 Suprimento Atual: {post_balance}"
                     )
                     bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-                    sent_tokens.add(address)
-                    logging.info(f"Token enviado: {name} ({address})")
-            
+                    sent_tokens.add(mint_address)
+                    logging.info(f"Token enviado: {name} ({mint_address})")
+
             return  # Sai da função caso a requisição tenha sido bem-sucedida
 
         except RequestException as req_err:
